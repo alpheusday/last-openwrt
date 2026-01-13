@@ -1,0 +1,124 @@
+#!/bin/sh
+
+# `last` for OpenWRT
+#
+# A wrapper that emulates the behavior of the `last` command on OpenWRT environment.
+#
+# Copyright (c) 2026-present, Alpheus
+#
+# This project is licensed under the terms of the MIT license.
+
+BLANK="    "
+
+WIDTH=26
+
+log_line() {
+    printf '%s\n' "$*"
+}
+
+log_para() {
+    printf '%s\n\n' "$*"
+}
+
+log_flag() {
+    printf "%s %-*s %s\n" "$BLANK" "$WIDTH" "$1" "$2"
+}
+
+get_help() {
+    log_para "\`last\` for OpenWRT"
+
+    log_line "Usage:"
+    log_para "$BLANK" "last [options...] <user>"
+
+    log_line "Flags:"
+    log_flag "-<number>, -n <number>" "limit the number of output"
+    log_flag "-R" "do not resolve hostname"
+
+    exit 1
+}
+
+LIMIT=0
+
+RESOLVE_HOST=1
+
+USE_USER=""
+
+# parse options
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        # help
+        -h | --help)
+            get_help
+            ;;
+        # limit
+        -[0-9]*)
+            LIMIT="${1#-}"
+            ;;
+        # limit
+        -n)
+            shift
+            [ -z "$1" ] && exit 1
+            LIMIT="$1"
+            ;;
+        # avoid hostname resolution
+        -R)
+            RESOLVE_HOST=0
+            ;;
+        # unsupported
+        --* | -*) ;;
+        # user
+        *)
+            USE_USER="$1"
+            ;;
+    esac
+    shift
+done
+
+# whether do user filter
+if [ -z "$USE_USER" ]; then
+    LOGINS="$(logread | grep "Password auth succeeded for")"
+else
+    LOGINS="$(logread | grep "Password auth succeeded for '$USE_USER'")"
+fi
+
+PIDS="$(echo "$LOGINS" | sed -n 's/.*dropbear\[\([0-9]*\)\].*/\1/p' | awk '!seen[$0]++')"
+
+OUTPUT="$(
+    for PID in $PIDS; do
+        MSG_LOGIN="$(logread | grep "dropbear\[$PID\]" | grep "Password auth succeeded for" | head -n 1)"
+        [ -z "$MSG_LOGIN" ] && continue
+
+        # user
+        USER="$(echo "$MSG_LOGIN" | sed -n "s/.*for '\([^']*\)'.*/\1/p")"
+
+        # host
+        if [ "$RESOLVE_HOST" -eq 1 ]; then
+            HOST="$(echo "$MSG_LOGIN" | sed -n 's/.*from \([^ ]*\).*/\1/p')"
+        else
+            HOST=""
+        fi
+
+        # start
+        # $1 = Mon, $2 = Jan, $3 = 31, $4 = 00:00:00
+        START="$(echo "$MSG_LOGIN" | awk '{ split($4, t, ":"); print $1, $2, $3, t[1] ":" t[2] }')"
+
+        MSG_LOGOUT="$(logread | grep "dropbear\[$PID\]" | grep -E 'Exit|Exited normally' | tail -n 1)"
+
+        # end
+        if [ -n "$MSG_LOGOUT" ]; then
+            END="$(echo "$MSG_LOGOUT" | awk '{ split($4, t, ":"); print t[1] ":" t[2] }')"
+        else
+            END="still logged in"
+        fi
+
+        printf "%-8s %-8s %-16s %s - %s\n" \
+            "$USER" "ssh" "$HOST" "$START" "$END"
+    done
+)"
+
+# limit output
+if [ "$LIMIT" -gt 0 ]; then
+    echo "$OUTPUT" | tail -n "$LIMIT"
+else
+    echo "$OUTPUT"
+fi
