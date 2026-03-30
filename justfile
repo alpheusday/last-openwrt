@@ -1,16 +1,11 @@
 set shell := ["bash", "-cu"]
-set windows-shell := ["powershell"]
+set windows-shell := ["pwsh", "-Command"]
 
 scripts := "scripts/*"
 
 # Default action
 _:
-    just lint
-    just fmt
-
-# Lint code
-lint:
-    shellcheck ./{{scripts}}
+    just --list -u
 
 # Format code
 fmt:
@@ -20,3 +15,12 @@ fmt:
     --case-indent \
     --space-redirects \
     ./{{scripts}}
+
+# Lint code
+lint:
+    shellcheck ./{{scripts}}
+
+# Check code
+check:
+    just fmt
+    just lint
